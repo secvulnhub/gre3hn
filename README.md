@@ -70,7 +70,7 @@
 
 ```bash
 # Download and make executable
-wget https://raw.githubusercontent.com/user/gre3hn/main/gre3hn
+wget https://raw.githubusercontent.com/gre3hn/main/gre3hn
 chmod +x gre3hn
 
 # Install dependencies (auto-detects your distro)

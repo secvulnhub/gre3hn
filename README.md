@@ -70,7 +70,7 @@
 
 ```bash
 # Download and make executable
-wget https://raw.githubusercontent.com/gre3hn/main/gre3hn
+wget https://raw.githubusercontent.com/0xb0rn3/main/gre3hn
 chmod +x gre3hn
 
 # Install dependencies (auto-detects your distro)
@@ -84,7 +84,7 @@ sudo ./gre3hn optimize
 
 ```bash
 # Clone the repository
-git clone https://github.com/user/gre3hn.git
+git clone https://github.com/0xb0rn3/gre3hn.git
 cd gre3hn
 
 # Make executable

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # Universal Linux Anonymous Shield engineered by 0xb0rn3
-# Multi-distro anonymization tool with Tor, I2P, MAC randomization
-# Supports: Arch, Ubuntu/Debian, RHEL/CentOS/Fedora, openSUSE, Gentoo, Alpine
+# Fixed initialization order to prevent directory/logging issues
 #
 
 set -euo pipefail
@@ -24,28 +23,19 @@ LOG_FILE="$CONFIG_DIR/shield.log"
 PID_FILE="$CONFIG_DIR/shield.pid"
 PYTHON_SCRIPT="$SCRIPT_DIR/anon_shield_core.py"
 
-# Distribution detection
+# Distribution detection variables
 DISTRO=""
 PACKAGE_MANAGER=""
 SERVICE_MANAGER=""
 
-# Status tracking
+# Status tracking variables
 TOR_RUNNING=false
 I2P_RUNNING=false
 MAC_RANDOMIZED=false
 DNS_SECURED=false
 FIREWALL_ACTIVE=false
 
-# Logging function
-log() {
-    local level="$1"
-    shift
-    local message="$*"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${timestamp} [${level}] ${message}" | tee -a "$LOG_FILE"
-}
-
-# Print functions
+# Print functions (these don't need logging, so they're safe to use early)
 print_success() { echo -e "${GREEN}✓${NC} $1"; }
 print_error() { echo -e "${RED}✗${NC} $1"; }
 print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
@@ -61,15 +51,69 @@ EOF
     echo -e "${NC}"
 }
 
-# Check if running as root
+# Early initialization - create directories first (MUST be called before any logging)
+early_init() {
+    # Handle different user contexts (regular user vs root via sudo)
+    if [[ -n "${SUDO_USER:-}" ]] && [[ "$EUID" -eq 0 ]]; then
+        # Running as root via sudo - use the original user's home
+        local original_home
+        original_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        CONFIG_DIR="$original_home/.anon_shield"
+    fi
+    
+    # Create config directory structure immediately
+    if ! mkdir -p "$CONFIG_DIR" 2>/dev/null; then
+        print_warning "Could not create config directory $CONFIG_DIR"
+        # Fallback to /tmp for this session
+        CONFIG_DIR="/tmp/.anon_shield_$$"
+        mkdir -p "$CONFIG_DIR"
+        print_info "Using temporary directory: $CONFIG_DIR"
+    fi
+    
+    # Update file paths based on final CONFIG_DIR
+    CONFIG_FILE="$CONFIG_DIR/config.conf"
+    LOG_FILE="$CONFIG_DIR/shield.log"
+    PID_FILE="$CONFIG_DIR/shield.pid"
+    
+    # Initialize log file with proper permissions
+    if ! touch "$LOG_FILE" 2>/dev/null; then
+        print_warning "Could not create log file, logging to stdout only"
+        LOG_FILE="/dev/stdout"
+    else
+        # If we created the directory as root but it should belong to a user, fix permissions
+        if [[ -n "${SUDO_USER:-}" ]] && [[ "$EUID" -eq 0 ]] && [[ "$LOG_FILE" != "/dev/stdout" ]]; then
+            chown -R "$SUDO_USER:$(id -gn "$SUDO_USER")" "$CONFIG_DIR" 2>/dev/null || true
+        fi
+    fi
+}
+
+# Safe logging function that works even if directories don't exist
+log() {
+    local level="$1"
+    shift
+    local message="$*"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local formatted_message="${timestamp} [${level}] ${message}"
+    
+    # Always echo to stdout first for immediate feedback
+    echo -e "$formatted_message"
+    
+    # Then try to append to log file if it's not stdout and exists
+    if [[ "$LOG_FILE" != "/dev/stdout" ]] && [[ -f "$LOG_FILE" ]]; then
+        echo -e "$formatted_message" >> "$LOG_FILE" 2>/dev/null || true
+    fi
+}
+
+# Check if running as root (when needed)
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         print_error "This script must be run as root (use sudo)"
+        print_info "Example: sudo $0 $*"
         exit 1
     fi
 }
 
-# Detect Linux distribution
+# Detect Linux distribution (now safe to call log after early_init)
 detect_distro() {
     if [[ -f /etc/arch-release ]]; then
         DISTRO="arch"
@@ -112,6 +156,8 @@ install_package() {
     local package="$1"
     local alt_package="${2:-$package}"
     
+    log "INFO" "Installing package: $package"
+    
     case "$PACKAGE_MANAGER" in
         "pacman")
             pacman -S --noconfirm "$package" 2>/dev/null || pacman -S --noconfirm "$alt_package" || true
@@ -143,6 +189,7 @@ install_package() {
 # Check and install dependencies
 install_dependencies() {
     print_info "Checking and installing dependencies..."
+    log "INFO" "Starting dependency installation"
     
     # Core dependencies
     install_package "tor" "tor"
@@ -150,7 +197,7 @@ install_dependencies() {
     install_package "iptables" "iptables"
     install_package "iproute2" "iproute2"
     
-    # Optional dependencies
+    # Optional dependencies based on distribution
     case "$DISTRO" in
         "arch")
             install_package "i2pd" "i2p"
@@ -173,16 +220,16 @@ install_dependencies() {
     
     # Install Python dependencies if pip is available
     if command -v pip3 &> /dev/null; then
+        log "INFO" "Installing Python dependencies"
         pip3 install --quiet psutil requests stem 2>/dev/null || true
     fi
     
     print_success "Dependencies installation completed"
+    log "INFO" "Dependencies installation completed successfully"
 }
-
-# Create Python core script
-create_python_core() {
+#create Python core script
     cat > "$PYTHON_SCRIPT" << 'PYTHON_EOF'
-#!/usr/bin/env python3
+ #!/usr/bin/env python3   
 """
 Anonymous Shield Core - Python component for complex operations
 """
